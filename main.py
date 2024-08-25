@@ -14,6 +14,9 @@ import argparse
 from models import *
 from utils import progress_bar
 
+from src.model.loss import ContrastiveLoss
+from src.model.arch import Model
+from src import const
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
@@ -68,8 +71,9 @@ print('==> Building model..')
 # net = ShuffleNetV2(1)
 # net = EfficientNetB0()
 # net = RegNetX_200MF()
-net = SimpleDLA()
-net = net.to(device)
+const.N_CLASSES = 10
+net = Model(const.IMAGE_SHAPE, is_contrastive=False)
+# net = net.to(device)
 if device == 'cuda':
     net = torch.nn.DataParallel(net)
     cudnn.benchmark = True
@@ -88,6 +92,10 @@ optimizer = optim.SGD(net.parameters(), lr=args.lr,
                       momentum=0.9, weight_decay=5e-4)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
 
+def ohe(tensor):
+    y = torch.zeros(tensor.shape[0], len(classes))
+    for idx, class_idx in enumerate(tensor.tolist()): y[idx, class_idx] = 1.
+    return y
 
 # Training
 def train(epoch):
@@ -97,17 +105,17 @@ def train(epoch):
     correct = 0
     total = 0
     for batch_idx, (inputs, targets) in enumerate(trainloader):
-        inputs, targets = inputs.to(device), targets.to(device)
+        inputs, targets = inputs.to(device), ohe(targets).to(device)
         optimizer.zero_grad()
         outputs = net(inputs)
-        loss = criterion(outputs, targets)
+        loss = criterion(outputs[0], targets)
         loss.backward()
         optimizer.step()
 
         train_loss += loss.item()
-        _, predicted = outputs.max(1)
+        predicted = outputs[0].argmax(1)
         total += targets.size(0)
-        correct += predicted.eq(targets).sum().item()
+        correct += predicted.eq(targets.argmax(1)).sum().item()
 
         progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                      % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
@@ -121,14 +129,14 @@ def test(epoch):
     total = 0
     with torch.no_grad():
         for batch_idx, (inputs, targets) in enumerate(testloader):
-            inputs, targets = inputs.to(device), targets.to(device)
+            inputs, targets = inputs.to(device), ohe(targets).to(device)
             outputs = net(inputs)
-            loss = criterion(outputs, targets)
+            loss = criterion(outputs[0], targets)
 
             test_loss += loss.item()
-            _, predicted = outputs.max(1)
+            predicted = outputs[0].argmax(1)
             total += targets.size(0)
-            correct += predicted.eq(targets).sum().item()
+            correct += predicted.eq(targets.argmax(1)).sum().item()
 
             progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                          % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
