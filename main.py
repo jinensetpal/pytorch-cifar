@@ -74,9 +74,9 @@ print('==> Building model..')
 # net = EfficientNetB0()
 # net = RegNetX_200MF()
 const.BASE_DIR = Path(__file__).parent.parent / 'contrastive-optimization'
-print(const.BASE_DIR)
 const.N_CLASSES = 2
 net = Model(const.IMAGE_SHAPE, is_contrastive=False)
+criterion = ContrastiveLoss(net.get_contrastive_cams)
 # net = net.to(device)
 if device == 'cuda':
     net = torch.nn.DataParallel(net)
@@ -91,7 +91,6 @@ if args.resume:
     best_acc = checkpoint['acc']
     start_epoch = checkpoint['epoch']
 
-criterion = nn.CrossEntropyLoss()
 optimizer = optim.SGD(net.parameters(), lr=args.lr,
                       momentum=0.9, weight_decay=5e-4)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
@@ -111,7 +110,7 @@ def train(epoch):
     for batch_idx, (inputs, targets) in enumerate(trainloader):
         optimizer.zero_grad()
         outputs = net(inputs)
-        loss = criterion(outputs[0], targets[1])
+        loss = criterion(outputs, targets)
         loss.backward()
         optimizer.step()
 
@@ -129,18 +128,17 @@ def test(epoch):
     test_loss = 0
     correct = 0
     total = 0
-    with torch.no_grad():
-        for batch_idx, (inputs, targets) in enumerate(testloader):
-            outputs = net(inputs)
-            loss = criterion(outputs[0], targets[1])
+    for batch_idx, (inputs, targets) in enumerate(testloader):
+        outputs = net(inputs)
+        loss = F.cross_entropy(outputs[0], targets[1])
 
-            test_loss += loss.item()
-            predicted = outputs[0].argmax(1)
-            total += targets[1].size(0)
-            correct += predicted.eq(targets[1].argmax(1)).sum().item()
+        test_loss += loss.item()
+        predicted = outputs[0].argmax(1)
+        total += targets[1].size(0)
+        correct += predicted.eq(targets[1].argmax(1)).sum().item()
 
-            progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                         % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
+        progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                     % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
 
     # Save checkpoint.
     acc = 100.*correct/total
@@ -157,7 +155,7 @@ def test(epoch):
         best_acc = acc
 
 
-for epoch in range(start_epoch, start_epoch+200):
+for epoch in range(start_epoch, start_epoch+100):
     train(epoch)
     test(epoch)
     scheduler.step()
